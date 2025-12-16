@@ -8,43 +8,35 @@
     
     <div id="geotab-map-addin-container" style="height:100vh; width:100%; overflow:hidden;">
         <h3>Loading Map Dashboard...</h3>
-        <p id="debug-status">Waiting for start...</p>
+        <p id="debug-status">Waiting for Geotab to connect...</p>
+        
+        <button id="manual-start-btn" style="display:none; padding:10px; margin-top:20px; cursor:pointer;">
+            Force Start Dashboard
+        </button>
     </div>
 
     <script type="text/javascript">
-        console.log("BRIDGE: File loaded.");
+        console.log("BRIDGE: File loaded (Universal Fix).");
 
-        geotab.addin.myMetrics = function (api, state) {
+        // 1. Define the Logic Function
+        var myMapAddinLogic = function (api, state) {
             
-            // CONFIGURATION
+            console.log("BRIDGE: Geotab connected! Function found.");
+            document.getElementById("debug-status").innerText = "Connecting...";
+
             var TARGET_APP_PAGE = "https://farindn.github.io/vehicle-status-addin/dashboard.html"; 
-            
-            // State tracking to prevent double-loading
             var isRendered = false;
 
-            // --- THE RENDER LOGIC ---
             var renderDashboard = function() {
-                // 1. If already rendered, do nothing
-                if (isRendered) {
-                    console.log("BRIDGE: Already rendered, skipping.");
-                    return;
-                }
-
-                console.log("BRIDGE: Starting Render...");
+                if (isRendered) return;
+                
+                console.log("BRIDGE: Rendering...");
                 var container = document.getElementById("geotab-map-addin-container");
                 var status = document.getElementById("debug-status");
-                
-                if (!container || !status) {
-                    console.log("BRIDGE: Container not found yet. Retrying in 100ms...");
-                    setTimeout(renderDashboard, 100); // Retry if DOM isn't ready
-                    return;
-                }
 
                 status.innerText = "Getting Session...";
 
                 api.getSession(function(session) {
-                    console.log("BRIDGE: Session received.");
-                    
                     var userName = session.userName;
                     var sessionId = session.sessionId;
                     var database = session.database;
@@ -64,35 +56,32 @@
                     
                     container.innerHTML = ""; 
                     container.appendChild(iframe);
-                    
-                    isRendered = true; // Mark as done
-                    console.log("BRIDGE: IFrame successfully injected.");
+                    isRendered = true;
                 });
             };
 
             return {
-                /**
-                 * Called when the Add-In first loads (could be background)
-                 */
                 initialize: function (api, state, callback) {
-                    console.log("BRIDGE: Initialize called.");
                     renderDashboard();
                     callback();
                 },
-
-                /**
-                 * Called when the user clicks the button/tab
-                 */
                 focus: function (api, state) {
-                    console.log("BRIDGE: Focus called.");
                     renderDashboard();
                 },
-
-                blur: function (api, state) {
-                    console.log("BRIDGE: Blur called.");
-                }
+                blur: function () { }
             };
         };
+
+        // 2. REGISTER UNDER BOTH NAMES (To catch config mismatches)
+        // If your config "name" is "MyMetrics", Geotab looks for myMetrics
+        geotab.addin.myMetrics = myMapAddinLogic;
+        
+        // If your config "name" is "Map Metrics Test", Geotab looks for mapMetricsTest
+        geotab.addin.mapMetricsTest = myMapAddinLogic;
+
+        // 3. Debug Helper: Print available namespaces to console
+        console.log("BRIDGE: Registered namespaces. Checking geotab.addin:", geotab.addin);
+
     </script>
 </body>
 </html>
