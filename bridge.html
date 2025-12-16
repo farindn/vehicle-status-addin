@@ -10,118 +10,110 @@
         <div id="loading-overlay" style="position:absolute; top:0; left:0; width:100%; height:100%; background:white; z-index:10; display:flex; flex-direction:column; justify-content:center; align-items:center;">
             <h3 style="color:#333;">Loading Dashboard...</h3>
             <p id="debug-status" style="color:#666; font-size:12px; margin-bottom: 15px;">Initializing...</p>
-            
-            <button id="manual-retry-btn" onclick="window.retryBridgeSession()" style="padding:10px 20px; background:#25477B; color:white; border:none; border-radius:4px; cursor:pointer;">
-                Retry Connection
-            </button>
+            <p id="debug-sub" style="color:#999; font-size:10px;">(Check console for details)</p>
         </div>
     </div>
 
     <script type="text/javascript">
-        console.log("BRIDGE: File loaded (Robust Version).");
+        console.log("BRIDGE: File loaded (Global Bypass Version).");
 
-        // 1. Define Logic
         var myMapAddinLogic = function (element, contextWrapper, state) {
             
             console.log("BRIDGE: Factory started.");
-
-            // EXTRACT API (Safety Check)
-            var api = contextWrapper && contextWrapper.api ? contextWrapper.api : contextWrapper;
-            console.log("BRIDGE: API Object:", api);
 
             // CONFIGURATION
             var TARGET_APP_PAGE = "https://farindn.github.io/vehicle-status-addin/dashboard.html"; 
             
             var isRendered = false;
-            var connectionAttempts = 0;
 
-            // --- RENDER LOGIC ---
+            // --- STRATEGY 1: Global Geotab Object (The Bypass) ---
+            // This bypasses the Map Add-In wrapper and talks to the main page controller
+            function tryGlobalSession(callback) {
+                console.log("BRIDGE: Attempting Global Bypass (window.geotab)...");
+                
+                if (window.geotab && window.geotab.getSession) {
+                    window.geotab.getSession(function(session) {
+                        console.log("BRIDGE: Global Session Success!", session);
+                        callback(session);
+                    });
+                    return true;
+                } else {
+                    console.warn("BRIDGE: window.geotab.getSession not found.");
+                    return false;
+                }
+            }
+
+            // --- STRATEGY 2: Local Wrapper (The Standard Way) ---
+            function tryLocalSession(callback) {
+                console.log("BRIDGE: Attempting Local Wrapper...");
+                var api = contextWrapper && contextWrapper.api ? contextWrapper.api : contextWrapper;
+                
+                if (api && api.getSession) {
+                    api.getSession(function(session) {
+                        console.log("BRIDGE: Local Session Success!", session);
+                        callback(session);
+                    });
+                } else {
+                    console.error("BRIDGE: Local API invalid.");
+                }
+            }
+
+            // --- RENDERER ---
             var renderDashboard = function() {
                 if (isRendered) return;
                 
-                connectionAttempts++;
+                var container = document.getElementById("geotab-map-addin-container");
                 var status = document.getElementById("debug-status");
                 var overlay = document.getElementById("loading-overlay");
-                var container = document.getElementById("geotab-map-addin-container");
 
-                status.innerText = "Attempt " + connectionAttempts + ": Requesting Session...";
-                console.log("BRIDGE: calling api.getSession() - Attempt " + connectionAttempts);
+                status.innerText = "Resolving Session...";
 
-                // WATCHDOG: If session doesn't return in 3 seconds, try again.
-                var watchdog = setTimeout(function() {
-                    if (!isRendered) {
-                        console.warn("BRIDGE: Session timed out. Retrying...");
-                        renderDashboard(); 
-                    }
-                }, 4000);
+                // DEFINE SUCCESS HANDLER
+                var onSessionReceived = function(session) {
+                    if (isRendered) return; // Prevent double render
+                    
+                    var userName = session.userName;
+                    var sessionId = session.sessionId;
+                    var database = session.database;
+                    // Use global location logic as fallback
+                    var server = window.location.hostname; 
 
-                // THE CALL
-                try {
-                    api.getSession(
-                        // SUCCESS CALLBACK
-                        function(session) {
-                            clearTimeout(watchdog); // Stop the timer
-                            console.log("BRIDGE: Session Success!", session);
-                            
-                            var userName = session.userName;
-                            var sessionId = session.sessionId;
-                            var database = session.database;
-                            var server = (api.mobileCaller && api.mobileCaller.server) ? api.mobileCaller.server : window.location.hostname;
+                    var iframeUrl = TARGET_APP_PAGE + 
+                                    "?userName=" + encodeURIComponent(userName) + 
+                                    "&sessionId=" + encodeURIComponent(sessionId) + 
+                                    "&database=" + encodeURIComponent(database) + 
+                                    "&server=" + encodeURIComponent(server);
 
-                            var iframeUrl = TARGET_APP_PAGE + 
-                                            "?userName=" + encodeURIComponent(userName) + 
-                                            "&sessionId=" + encodeURIComponent(sessionId) + 
-                                            "&database=" + encodeURIComponent(database) + 
-                                            "&server=" + encodeURIComponent(server);
+                    var iframe = document.createElement('iframe');
+                    iframe.src = iframeUrl;
+                    iframe.style.width = "100%";
+                    iframe.style.height = "100%";
+                    iframe.style.border = "none";
+                    
+                    container.appendChild(iframe);
+                    
+                    if(overlay) overlay.style.display = 'none';
+                    isRendered = true;
+                };
 
-                            var iframe = document.createElement('iframe');
-                            iframe.src = iframeUrl;
-                            iframe.style.width = "100%";
-                            iframe.style.height = "100%";
-                            iframe.style.border = "none";
-                            
-                            container.appendChild(iframe);
-                            
-                            // Hide overlay
-                            if(overlay) overlay.style.display = 'none';
-
-                            isRendered = true;
-                        },
-                        // ERROR CALLBACK (If supported)
-                        function(err) {
-                            clearTimeout(watchdog);
-                            console.error("BRIDGE: Session Error:", err);
-                            status.innerText = "Error getting session. Retrying...";
-                        }
-                    );
-                } catch (e) {
-                    console.error("BRIDGE: Critical Exception calling getSession", e);
-                    status.innerText = "Critical API Error.";
-                }
+                // EXECUTE STRATEGIES
+                // 1. Try Global First (Fastest/Most Reliable on broken maps)
+                var globalAttempt = tryGlobalSession(onSessionReceived);
+                
+                // 2. If Global failed (or just to be safe), try Local in parallel
+                tryLocalSession(onSessionReceived);
             };
 
-            // Expose retry to the button
-            window.retryBridgeSession = function() {
-                console.log("BRIDGE: Manual Retry Clicked.");
-                renderDashboard();
-            };
-
-            // Start automatically after 1 second (give map time to settle)
-            setTimeout(renderDashboard, 1000);
+            // Execute immediately
+            setTimeout(renderDashboard, 500);
 
             return {
-                initialize: function (api, state, callback) {
-                    // renderDashboard(); // Rely on the timeout instead to avoid race conditions
-                    callback();
-                },
-                focus: function (api, state) {
-                     // renderDashboard(); 
-                },
+                initialize: function (api, state, callback) { renderDashboard(); callback(); },
+                focus: function (api, state) { renderDashboard(); },
                 blur: function () { }
             };
         };
 
-        // 2. Register
         geotab.addin.myMetrics = myMapAddinLogic;
         geotab.addin.mapMetricsTest = myMapAddinLogic;
 
