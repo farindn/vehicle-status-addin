@@ -33,7 +33,6 @@
             const [error, setError] = useState(null);
 
             useEffect(() => {
-                // 1. Extract Credentials from URL
                 const params = new URLSearchParams(window.location.search);
                 const server = params.get('server');
                 const database = params.get('database');
@@ -41,20 +40,18 @@
                 const userName = params.get('userName');
 
                 if (!server || !sessionId) {
-                    setError("Missing session credentials in URL.");
+                    setError("Missing session credentials.");
                     setLoading(false);
                     return;
                 }
 
-                // 2. Define the JSON-RPC Request
+                // FIX: Broader search to ensure we get ANY data
                 const rpcUrl = `https://${server}/apiv1`;
                 const payload = {
                     method: "Get",
                     params: {
                         typeName: "DeviceStatusInfo",
-                        search: {
-                            deviceSearch: { id: "ActiveDevice" } 
-                        },
+                        search: {}, // Removed "ActiveDevice" constraint
                         credentials: {
                             database: database,
                             sessionId: sessionId,
@@ -63,10 +60,9 @@
                     }
                 };
 
-                // 3. Execute Fetch (No Library Needed)
                 const fetchData = async () => {
                     try {
-                        console.log("DASHBOARD: Fetching via native API...");
+                        console.log("DASHBOARD: Fetching DeviceStatusInfo...");
                         const response = await fetch(rpcUrl, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -75,11 +71,13 @@
 
                         const json = await response.json();
 
-                        if (json.error) {
-                            throw new Error(json.error.message || "Geotab API Error");
+                        if (json.error) throw new Error(json.error.message);
+
+                        console.log("DASHBOARD: Raw Data Received:", json.result);
+                        if (json.result.length === 0) {
+                            console.warn("DASHBOARD: Data is empty. Check if devices exist or are active.");
                         }
 
-                        console.log("DASHBOARD: Data received", json.result);
                         setDeviceData(json.result);
                         setLoading(false);
                     } catch (err) {
@@ -92,15 +90,18 @@
                 fetchData();
             }, []);
 
-            // 4. Calculate Metrics
             const metrics = useMemo(() => {
                 let total = 0, started = 0, stopped = 0, offline = 0;
 
                 deviceData.forEach(d => {
                     total++;
-                    if (!d.isDeviceCommunicating) {
+                    // Check logic: Ensure properties exist
+                    const isComm = d.isDeviceCommunicating !== false; // Default to true if undefined
+                    const isDriving = d.isDriving === true;
+
+                    if (!isComm) {
                         offline++;
-                    } else if (d.isDriving) {
+                    } else if (isDriving) {
                         started++;
                     } else {
                         stopped++;
@@ -110,7 +111,7 @@
             }, [deviceData]);
 
             if (error) return <div className="error"><strong>Error:</strong> {error}</div>;
-            if (loading) return <div className="loading">Loading fleet data...</div>;
+            if (loading) return <div className="loading">Loading...</div>;
 
             return (
                 <div>
@@ -133,6 +134,8 @@
                             <div className="label">Offline</div>
                         </div>
                     </div>
+                    {/* Debugging helper: Show raw count if 0 */}
+                    {metrics.total === 0 && <p style={{fontSize:12, color:'#999'}}>No device status data returned from API.</p>}
                 </div>
             );
         }
