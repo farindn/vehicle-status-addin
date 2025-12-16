@@ -14,14 +14,17 @@
     </div>
 
     <script type="text/javascript">
-        console.log("BRIDGE: File loaded (Arguments Fix).");
+        console.log("BRIDGE: File loaded (Wrapper Fix).");
 
-        // CRITICAL CHANGE: Note the arguments (element, api, state)
-        var myMapAddinLogic = function (element, api, state) {
+        // Argument signature: (element, wrapper, state)
+        var myMapAddinLogic = function (element, contextWrapper, state) {
             
             console.log("BRIDGE: Factory started.");
-            console.log("BRIDGE: Arg1 (Element):", element);
-            console.log("BRIDGE: Arg2 (API):", api);
+            
+            // FIX: The actual API is nested inside the wrapper
+            var api = contextWrapper.api; 
+            
+            console.log("BRIDGE: Extracted API:", api);
 
             // CONFIGURATION
             var TARGET_APP_PAGE = "https://farindn.github.io/vehicle-status-addin/dashboard.html"; 
@@ -36,7 +39,7 @@
                 var overlay = document.getElementById("loading-overlay");
 
                 if (!api || !api.getSession) {
-                    console.error("BRIDGE: API object is missing or invalid!", api);
+                    console.error("BRIDGE: API extraction failed!", contextWrapper);
                     status.innerText = "Error: API Invalid";
                     return;
                 }
@@ -73,7 +76,7 @@
                 });
             };
 
-            // Execute immediately (Bypass pattern)
+            // Execute immediately
             setTimeout(renderDashboard, 500);
 
             return {
