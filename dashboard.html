@@ -8,6 +8,7 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    
     <script src="https://cdn.jsdelivr.net/npm/mg-api-js@2.4.0/dist/mg-api-js.min.js"></script>
     
     <style>
@@ -17,6 +18,7 @@
         .value { font-size: 28px; font-weight: bold; margin-bottom: 5px; }
         .label { font-size: 13px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
         .loading { color: #666; font-style: italic; }
+        .error { color: #d32f2f; background: #ffebee; padding: 10px; border-radius: 4px; font-size: 12px; }
         h2 { margin-top: 0; font-size: 18px; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
     </style>
 </head>
@@ -33,8 +35,18 @@
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
 
-            // 1. Initialize API using credentials passed from bridge.html
+            // 1. Initialize API
             useEffect(() => {
+                // Check if the library loaded correctly
+                if (typeof GeotabApi === 'undefined' && typeof window.GeotabApi === 'undefined') {
+                    setError("Error: 'mg-api-js' library failed to load.");
+                    setLoading(false);
+                    return;
+                }
+
+                // Get the class constructor (handle both global scopes)
+                const ApiClass = window.GeotabApi || GeotabApi;
+
                 const params = new URLSearchParams(window.location.search);
                 const credentials = {
                     server: params.get('server'),
@@ -43,14 +55,20 @@
                 };
 
                 if (credentials.sessionId && credentials.server) {
-                    // Initialize GeotabApi (loaded from CDN script above)
-                    const geotabApi = new GeotabApi({
-                        authentication: { credentials },
-                        path: credentials.server
-                    });
-                    setApi(geotabApi);
+                    try {
+                        console.log("DASHBOARD: Authenticating with", credentials.server);
+                        const geotabApi = new ApiClass({
+                            authentication: { credentials },
+                            path: credentials.server
+                        });
+                        setApi(geotabApi);
+                    } catch (err) {
+                        console.error("DASHBOARD: Init failed", err);
+                        setError("Failed to initialize API: " + err.message);
+                        setLoading(false);
+                    }
                 } else {
-                    setError("No session credentials found.");
+                    setError("No session credentials found in URL.");
                     setLoading(false);
                 }
             }, []);
@@ -61,15 +79,24 @@
                 
                 const fetchData = async () => {
                     try {
+                        console.log("DASHBOARD: Fetching DeviceStatusInfo...");
+                        
+                        // Using 'call' with async/await
                         const results = await api.call("Get", {
                             typeName: "DeviceStatusInfo",
-                            search: { deviceSearch: { id: "ActiveDevice" } }
+                            search: {
+                                deviceSearch: {
+                                    id: "ActiveDevice" 
+                                }
+                            }
                         });
+                        
+                        console.log("DASHBOARD: Data received", results);
                         setDeviceData(results);
                         setLoading(false);
                     } catch (err) {
-                        console.error(err);
-                        setError("API Error: Check console");
+                        console.error("DASHBOARD: API Call Error", err);
+                        setError("API Error: " + (err.message || JSON.stringify(err)));
                         setLoading(false);
                     }
                 };
@@ -88,13 +115,13 @@
                     } else if (d.isDriving) {
                         started++;
                     } else {
-                        stopped++;
+                        stopped++; // Stopped includes Idling in this data view
                     }
                 });
                 return { total, started, stopped, offline };
             }, [deviceData]);
 
-            if (error) return <div style={{color:'red'}}>{error}</div>;
+            if (error) return <div className="error"><strong>Error:</strong> {error}</div>;
             if (loading) return <div className="loading">Loading fleet data...</div>;
 
             return (
