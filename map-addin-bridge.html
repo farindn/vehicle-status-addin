@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Geotab Map Add-In Bridge</title>
+</head>
+<body>
+    
+    <div id="react-app-container" style="height:100vh; width:100%; overflow:hidden;"></div>
+
+    <script type="text/javascript">
+        /**
+         * Geotab Map Add-In Entry Point
+         * This function matches the namespace used in config.json
+         */
+        geotab.addin.mapMetrics = function (api, state) {
+            
+            // CONFIGURATION: The URL where the React App is hosted
+            var REACT_APP_URL = "https://partner-react-app.com"; 
+            var container = document.getElementById("react-app-container");
+
+            return {
+                /**
+                 * initialize() is called when the user clicks the Add-In
+                 */
+                initialize: function (api, state, callback) {
+                    
+                    api.getSession(function(session) {
+                        if (!session) {
+                            console.error("Geotab Session not found");
+                            return;
+                        }
+
+                        // 1. Prepare credentials to pass to React
+                        var userName = session.userName;
+                        var sessionId = session.sessionId;
+                        var database = session.database;
+                        // Handle server logic (check if mobile caller or browser hostname)
+                        var server = api.mobileCaller ? api.mobileCaller.server : window.location.hostname;
+
+                        // 2. Build the IFrame URL with auth params
+                        var iframeUrl = REACT_APP_URL + 
+                                        "?userName=" + encodeURIComponent(userName) + 
+                                        "&sessionId=" + encodeURIComponent(sessionId) + 
+                                        "&database=" + encodeURIComponent(database) + 
+                                        "&server=" + encodeURIComponent(server);
+
+                        // 3. Inject IFrame into the DOM
+                        var iframe = document.createElement('iframe');
+                        iframe.src = iframeUrl;
+                        iframe.style.width = "100%";
+                        iframe.style.height = "100%";
+                        iframe.style.border = "none";
+                        
+                        container.innerHTML = ""; 
+                        container.appendChild(iframe);
+                        
+                        callback();
+                    });
+                },
+
+                focus: function () { 
+                    // Optional: Code to run when the user focuses the tab
+                },
+                blur: function () { 
+                    // Optional: Code to run when the user leaves the tab
+                }
+            };
+        };
+    </script>
+</body>
+</html>
