@@ -10,18 +10,24 @@
     <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
     
     <style>
+        /* 2.1 Color Palette & Variables */
         :root {
-            --bg-color: #1e1e2e;
-            --card-surface: rgba(255, 255, 255, 0.05);
-            --border-color: rgba(255, 255, 255, 0.1);
-            --text-primary: #ffffff;
-            --text-secondary: #a0a0a0;
-            --status-good: #4caf50;
-            --status-bad: #f44336;
-            --status-warn: #ff9800;
-            --glass-blur: blur(10px);
-            --shadow-sm: 0 4px 6px rgba(0, 0, 0, 0.1);
-            --shadow-hover: 0 8px 15px rgba(0, 0, 0, 0.2);
+            /* Core Colors */
+            --bg-color: #f5f7fa;        /* Soft Blue-Grey Background */
+            --color-primary: #25457B;   /* Navy Blue (Brand) */
+            --color-accent: #00B8FF;    /* Cyan (Active/Highlights) */
+            --color-white: #FFFFFF;     /* Card Surface */
+            --color-slate: #607690;     /* Secondary Text */
+            
+            /* Status Colors */
+            --color-success: #13AA09;   /* Green (Driving/Communicating) */
+            --color-error: #FE4A3F;     /* Red (Offline/Error) */
+            --color-warning: #ff9800;   /* Orange (Stopped - implied for visual distinction) */
+
+            /* Shadows & Effects */
+            --shadow-card: 0 2px 6px rgba(0, 0, 0, 0.05);
+            --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.08);
+            --radius: 8px;
         }
 
         body {
@@ -29,20 +35,19 @@
             margin: 0;
             padding: 20px;
             background-color: var(--bg-color);
-            color: var(--text-primary);
+            color: #333;
             height: 100vh;
             box-sizing: border-box;
-            overflow: hidden; /* Prevent scrollbars in iframe */
+            overflow: hidden; 
         }
 
         /* Typography */
         h2 {
-            font-size: 1.25rem; /* 20px */
+            font-size: 1.25rem; 
             font-weight: 600;
             margin: 0 0 20px 0;
-            letter-spacing: 0.5px;
-            color: var(--text-primary);
-            border-bottom: 1px solid var(--border-color);
+            color: var(--color-primary); /* Navy Brand Color */
+            border-bottom: 2px solid rgba(37, 69, 123, 0.1); /* Subtle primary border */
             padding-bottom: 10px;
         }
 
@@ -51,83 +56,103 @@
             height: 100%;
             display: flex;
             flex-direction: column;
+            max-width: 800px;
+            margin: 0 auto;
         }
 
         .metrics-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 15px;
+            gap: 20px;
         }
 
-        /* Glassmorphism Cards */
+        /* Cards */
         .metric-card {
-            background: var(--card-surface);
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur); /* Safari support */
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 20px;
+            background: var(--color-white);
+            border-radius: var(--radius);
+            padding: 24px;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            box-shadow: var(--shadow-sm);
-            transition: all 0.3s ease;
+            box-shadow: var(--shadow-card);
+            border: none; /* Clean look, shadow only */
+            transition: all 0.2s ease-in-out;
             cursor: default;
+            position: relative;
+            overflow: hidden;
         }
 
         .metric-card:hover {
-            box-shadow: var(--shadow-hover);
             transform: translateY(-2px);
-            background: rgba(255, 255, 255, 0.08);
+            box-shadow: var(--shadow-hover);
+        }
+
+        /* Decorative top border for cards to add color pop */
+        .metric-card::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: var(--border-color, #e0e0e0); /* Default fallback */
         }
 
         /* KPI Values */
         .kpi-value {
             font-size: 2.5rem;
             font-weight: 700;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
             line-height: 1;
-            text-shadow: 0 0 10px rgba(0,0,0,0.3);
+            color: #333;
         }
 
         .kpi-label {
             font-size: 0.9rem;
-            color: var(--text-secondary);
-            font-weight: 400;
+            color: var(--color-slate);
+            font-weight: 500;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 0.5px;
         }
 
-        /* Status Accents (Neon Glows) */
-        .status-total { color: var(--text-primary); }
-        .status-good { color: var(--status-good); text-shadow: 0 0 5px rgba(76, 175, 80, 0.3); }
-        .status-bad { color: var(--status-bad); text-shadow: 0 0 5px rgba(244, 67, 54, 0.3); }
-        .status-warn { color: var(--status-warn); text-shadow: 0 0 5px rgba(255, 152, 0, 0.3); }
+        /* Status Coloring */
+        /* Specific overrides for value colors if desired, or keep generic dark */
+        .status-total .kpi-value { color: var(--color-primary); }
+        .status-good .kpi-value { color: var(--color-success); }
+        .status-bad .kpi-value { color: var(--color-error); }
+        .status-warn .kpi-value { color: var(--color-warning); }
 
-        /* Loading & Error States */
+        /* Card Top Borders */
+        .card-total::after { background: var(--color-primary); }
+        .card-good::after { background: var(--color-success); }
+        .card-bad::after { background: var(--color-error); }
+        .card-warn::after { background: var(--color-warning); }
+
+        /* Loading & Error */
         .loading-container, .error-container {
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             height: 100%;
-            color: var(--text-secondary);
+            color: var(--color-slate);
             text-align: center;
         }
 
         .error-container {
-            color: var(--status-bad);
-            background: rgba(244, 67, 54, 0.1);
-            border: 1px solid var(--status-bad);
-            border-radius: 12px;
+            color: var(--color-error);
+            background: #FFF5F5;
+            border: 1px solid #FFDCDC;
+            border-radius: var(--radius);
             padding: 20px;
         }
-        
+
         .debug-text {
             font-size: 0.75rem;
             font-family: monospace;
-            color: var(--text-secondary);
+            color: var(--color-slate);
+            opacity: 0.7;
             margin-top: 10px;
         }
     </style>
@@ -165,7 +190,7 @@
                     method: "Get",
                     params: {
                         typeName: "DeviceStatusInfo",
-                        search: {}, // Empty search to get all devices
+                        search: {}, // Get all devices
                         credentials: {
                             database: database,
                             sessionId: sessionId,
@@ -217,17 +242,15 @@
                 return { total, started, stopped, offline };
             }, [deviceData]);
 
-            // LOADING STATE
             if (loading) {
                 return (
                     <div className="loading-container">
-                        <div style={{marginBottom: '10px'}}>Connecting to Fleet...</div>
-                        <div className="debug-text">Fetching DeviceStatusInfo</div>
+                        <div style={{fontWeight: '500', color: 'var(--color-primary)'}}>Connecting to Fleet...</div>
+                        <div className="debug-text">Loading DeviceStatusInfo</div>
                     </div>
                 );
             }
 
-            // ERROR STATE
             if (error) {
                 return (
                     <div className="error-container">
@@ -237,41 +260,39 @@
                 );
             }
 
-            // SUCCESS STATE
             return (
                 <div className="dashboard-container">
                     <h2>Fleet Overview</h2>
                     
                     <div className="metrics-grid">
                         {/* Total Vehicles */}
-                        <div className="metric-card">
-                            <div className="kpi-value status-total">{metrics.total}</div>
+                        <div className="metric-card card-total status-total">
+                            <div className="kpi-value">{metrics.total}</div>
                             <div className="kpi-label">Total Fleet</div>
                         </div>
 
-                        {/* Started (Driving) */}
-                        <div className="metric-card" style={{borderBottom: '2px solid var(--status-good)'}}>
-                            <div className="kpi-value status-good">{metrics.started}</div>
+                        {/* Started (Driving) - Green */}
+                        <div className="metric-card card-good status-good">
+                            <div className="kpi-value">{metrics.started}</div>
                             <div className="kpi-label">Active / Driving</div>
                         </div>
 
-                        {/* Stopped */}
-                        <div className="metric-card" style={{borderBottom: '2px solid var(--status-warn)'}}>
-                            <div className="kpi-value status-warn">{metrics.stopped}</div>
+                        {/* Stopped - Orange (Implied Warning/Idle) */}
+                        <div className="metric-card card-warn status-warn">
+                            <div className="kpi-value">{metrics.stopped}</div>
                             <div className="kpi-label">Stopped</div>
                         </div>
 
-                        {/* Offline */}
-                        <div className="metric-card" style={{borderBottom: '2px solid var(--status-bad)'}}>
-                            <div className="kpi-value status-bad">{metrics.offline}</div>
+                        {/* Offline - Red (Error) */}
+                        <div className="metric-card card-bad status-bad">
+                            <div className="kpi-value">{metrics.offline}</div>
                             <div className="kpi-label">Offline</div>
                         </div>
                     </div>
 
-                    {/* Footer / Debug info */}
                     <div style={{marginTop: 'auto', textAlign: 'center', paddingTop: '20px'}}>
                         <div className="debug-text">
-                            Data Source: DeviceStatusInfo • Live Update
+                            Data Source: DeviceStatusInfo • Geotab API
                         </div>
                     </div>
                 </div>
