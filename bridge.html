@@ -1,81 +1,80 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="utf-8" />
-    <title>Geotab Bridge</title>
-</head>
+    <title>Fleet Status Map Add-In Bridge</title>
+    </head>
 <body>
     
     <div id="geotab-map-addin-container" style="height:100vh; width:100%; overflow:hidden; position: relative;">
-        <div id="loading-overlay" style="position:absolute; top:0; left:0; width:100%; height:100%; background:white; z-index:10; display:flex; flex-direction:column; justify-content:center; align-items:center;">
-            <h3 style="color:#333;">Loading Dashboard...</h3>
-            <p id="debug-status" style="color:#666; font-size:12px;">Initializing...</p>
-            <p id="debug-sub" style="color:#999; font-size:10px;">(Auto-starting...)</p>
+        <div id="loading-overlay" style="position:absolute; top:0; left:0; width:100%; height:100%; background:white; z-index:10; display:flex; flex-direction:column; justify-content:center; align-items:center; font-family: sans-serif;">
+            <h3 style="color:#25457B;">Fleet Status Overview</h3>
+            <p id="debug-status" style="color:#666; font-size:12px;">Initializing secure connection...</p>
+            <p id="debug-sub" style="color:#999; font-size:10px;">(Please wait)</p>
         </div>
     </div>
 
     <script type="text/javascript">
-        console.log("BRIDGE: File loaded (Final Combined Version).");
+        console.log("BRIDGE: Fleet Status Add-In Loaded.");
 
         /**
-         * MAP ADD-IN ENTRY POINT
+         * MAIN ADD-IN FACTORY
+         * Geotab calls this function to initialize the Add-In.
          * Signature: (element, services)
          */
-        var myMapAddinLogic = function (element, services) {
+        var fleetStatusAddin = function (element, services) {
             
-            console.log("BRIDGE: Factory started.");
-
-            // 1. CONFIGURATION
-            var TARGET_APP_PAGE = "https://farindn.github.io/vehicle-status-addin/dashboard.html"; 
+            // --- CONFIGURATION ---
+            // The URL where the React Dashboard is hosted
+            var DASHBOARD_URL = "https://farindn.github.io/vehicle-status-addin/dashboard.html"; 
             
-            // 2. SAFETY CHECK: Extract API
-            var apiService = (services && services.api) ? services.api : null;
-            
+            // --- STATE MANAGEMENT ---
             var isRendered = false;
+            
+            // Extract the API Service from the Geotab context
+            // Safety check: Ensure services object exists
+            var apiService = (services && services.api) ? services.api : null;
 
-            // --- THE RENDER LOGIC ---
+            /**
+             * RENDER FUNCTION
+             * Handles authentication and IFrame injection
+             */
             var renderDashboard = function() {
+                // Prevent double-rendering
                 if (isRendered) return;
                 
                 var container = document.getElementById("geotab-map-addin-container");
                 var status = document.getElementById("debug-status");
-                var subStatus = document.getElementById("debug-sub");
                 var overlay = document.getElementById("loading-overlay");
 
-                // Check for DOM readiness
+                // 1. Check DOM Readiness
                 if (!container || !status) {
-                    // Retry if DOM isn't painted yet
-                    setTimeout(renderDashboard, 200);
+                    setTimeout(renderDashboard, 200); // Retry if DOM isn't ready
                     return;
                 }
 
-                status.innerText = "Requesting Session...";
+                status.innerText = "Requesting Session Token...";
                 
                 if (!apiService) {
-                    status.innerText = "Error: API Service Not Found";
-                    console.error("BRIDGE: services.api is missing", services);
+                    status.innerText = "Error: Geotab API Service Not Found";
+                    console.error("BRIDGE: Critical Error - services.api is missing", services);
                     return;
                 }
 
-                // 3. EXECUTE (Using Promises per documentation)
-                console.log("BRIDGE: Calling api.getSession()...");
-                
+                // 2. Get Session (Using Promise API)
                 apiService.getSession()
                     .then(function(session) {
-                        console.log("BRIDGE: Session Success!", session);
+                        console.log("BRIDGE: Session Authenticated.", session.userName);
                         
-                        var userName = session.userName;
-                        var sessionId = session.sessionId;
-                        var database = session.database;
-                        // Fallback for server
-                        var server = window.location.hostname;
-
-                        var iframeUrl = TARGET_APP_PAGE + 
-                                        "?userName=" + encodeURIComponent(userName) + 
-                                        "&sessionId=" + encodeURIComponent(sessionId) + 
-                                        "&database=" + encodeURIComponent(database) + 
+                        // 3. Construct Secure IFrame URL
+                        var server = window.location.hostname; // Current Geotab server
+                        var iframeUrl = DASHBOARD_URL + 
+                                        "?userName=" + encodeURIComponent(session.userName) + 
+                                        "&sessionId=" + encodeURIComponent(session.sessionId) + 
+                                        "&database=" + encodeURIComponent(session.database) + 
                                         "&server=" + encodeURIComponent(server);
 
+                        // 4. Create and Inject IFrame
                         var iframe = document.createElement('iframe');
                         iframe.src = iframeUrl;
                         iframe.style.width = "100%";
@@ -84,21 +83,19 @@
                         
                         container.appendChild(iframe);
                         
-                        // Hide overlay
+                        // 5. Cleanup
                         if (overlay) overlay.style.display = 'none';
                         isRendered = true;
                     })
                     .catch(function(err) {
-                        console.error("BRIDGE: Session Error", err);
-                        status.innerText = "Session Failed.";
-                        subStatus.innerText = err.message || "Check console";
+                        console.error("BRIDGE: Authentication Failed", err);
+                        status.innerText = "Session Error: " + err.message;
                         
-                        // FAILSAFE: If the Promise fails (e.g. AbortError), try the Global Bypass
-                        console.log("BRIDGE: Attempting Global Bypass Fallback...");
+                        // Fallback: Try Global Geotab Object (Last Resort)
                         if (window.geotab && window.geotab.getSession) {
+                            console.log("BRIDGE: Attempting global fallback...");
                             window.geotab.getSession(function(s) {
-                                console.log("BRIDGE: Global Bypass Success!");
-                                // Recursive call with mocked success to finish rendering
+                                // Mock the promise success to retry
                                 apiService.getSession = function() { return Promise.resolve(s); };
                                 renderDashboard(); 
                             });
@@ -106,32 +103,35 @@
                     });
             };
 
-            // 4. AUTO-START (The "Nuclear" Option)
-            // We do not wait for .initialize(). We run this immediately.
+            // --- AUTO-START ---
+            // Execute immediately to bypass potential Map initialization delays
             setTimeout(renderDashboard, 500);
 
-            // 5. Standard Lifecycle (Just in case Geotab decides to work normally)
+            // --- LIFECYCLE HANDLERS ---
             return {
                 initialize: function (api, state, callback) {
-                    console.log("BRIDGE: initialize called");
+                    console.log("BRIDGE: Lifecycle - Initialize");
                     renderDashboard();
                     if (callback) callback();
                 },
                 focus: function (api, state) {
-                    console.log("BRIDGE: focus called");
+                    console.log("BRIDGE: Lifecycle - Focus");
                     renderDashboard();
                 },
-                blur: function () { }
+                blur: function () { 
+                    console.log("BRIDGE: Lifecycle - Blur");
+                }
             };
         };
 
-        // Register
-        geotab.addin.myMetrics = myMapAddinLogic;
-        geotab.addin.mapMetricsTest = myMapAddinLogic;
+        // --- REGISTRATION ---
+        // Register the Add-In under the namespace defined in config.json
+        // Name in Config: "Fleet Status Overview" -> Geotab looks for: fleetStatusOverview
+        geotab.addin.fleetStatusOverview = fleetStatusAddin;
+        
+        // Legacy alias for backward compatibility during testing
+        geotab.addin.myMetrics = fleetStatusAddin;
 
     </script>
 </body>
 </html>
-
-
-
