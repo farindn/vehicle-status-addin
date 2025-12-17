@@ -16,24 +16,33 @@
     <script type="text/javascript">
         var fleetStatusAddin = function (element, services) {
             
+            // CONFIGURATION
             var DASHBOARD_URL = "https://farindn.github.io/vehicle-status-addin/dashboard.html"; 
+            
+            // SECURITY: Define the exact allowed origin
+            var TARGET_ORIGIN = new URL(DASHBOARD_URL).origin;
+
             var isRendered = false;
-            var iframeRef = null; // Store reference to talk to it later
+            var iframeRef = null;
             
             var apiService = (services && services.api) ? services.api : null;
             var pageService = (services && services.page) ? services.page : null;
 
-            // --- HELPER: Send Data to React ---
-            var sendGroupUpdate = function(groups) {
-                if (!iframeRef || !iframeRef.contentWindow) return;
-                
-                var groupIds = groups.map(function(g) { return g.id; }).join(",");
-                console.log("BRIDGE: Sending new groups to React:", groupIds);
-                
-                iframeRef.contentWindow.postMessage({
-                    type: "FILTER_UPDATE",
-                    groups: groupIds
-                }, "*"); // In production, replace '*' with your specific DASHBOARD_URL origin for security
+            // --- HELPER: FORMAT & SEND ---
+            var fetchAndSendGroups = function() {
+                if (!pageService || !iframeRef) return;
+
+                pageService.getFilterState().then(function(groups) {
+                    var groupIds = groups.map(function(g) { return g.id; }).join(",");
+                    console.log("BRIDGE: Sending Group Update:", groupIds);
+
+                    iframeRef.contentWindow.postMessage({
+                        type: "FILTER_UPDATE",
+                        groups: groupIds
+                    }, TARGET_ORIGIN); // Secure Send
+                }).catch(function(err) {
+                    console.error("BRIDGE: Filter Sync Error", err);
+                });
             };
 
             var renderDashboard = function() {
@@ -43,7 +52,6 @@
                 var overlay = document.getElementById("loading-overlay");
 
                 if (!container) { setTimeout(renderDashboard, 200); return; }
-                
                 if (!apiService || !pageService) return;
 
                 Promise.all([
@@ -60,7 +68,7 @@
                                     "&sessionId=" + encodeURIComponent(session.sessionId) + 
                                     "&database=" + encodeURIComponent(session.database) + 
                                     "&server=" + encodeURIComponent(server) +
-                                    "&groups=" + encodeURIComponent(groupIds); // Initial Load
+                                    "&groups=" + encodeURIComponent(groupIds);
 
                     var iframe = document.createElement('iframe');
                     iframe.src = iframeUrl;
@@ -69,19 +77,15 @@
                     iframe.style.border = "none";
                     
                     container.appendChild(iframe);
-                    iframeRef = iframe; // Save reference
+                    iframeRef = iframe; 
                     
                     if (overlay) overlay.style.display = 'none';
                     isRendered = true;
 
-                    // --- LISTENER: WATCH FOR FILTER CHANGES ---
-                    // This fires when user changes the group dropdown in MyGeotab
-                    pageService.attach('filterChange', function(data) {
-                        console.log("BRIDGE: Filter Changed!", data);
-                        // data.groups contains the new array of groups
-                        if (data && data.groups) {
-                            sendGroupUpdate(data.groups);
-                        }
+                    // --- ROBUST LISTENER ---
+                    pageService.attach('filterChange', function(event) {
+                        console.log("BRIDGE: Filter change detected. Fetching new state...");
+                        fetchAndSendGroups();
                     });
 
                 }).catch(function(err) {
