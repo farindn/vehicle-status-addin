@@ -10,6 +10,7 @@
     
     <style>
         :root {
+            /* Palette: Enterprise Light */
             --bg-color: #f5f7fa;
             --color-primary: #25457B;
             --color-white: #FFFFFF;
@@ -40,14 +41,12 @@
 
         .metrics-grid {
             display: grid; 
-            grid-template-columns: 1fr 1fr; /* Default 2 columns */
+            grid-template-columns: 1fr 1fr; 
             gap: 15px;
         }
 
-        /* Span the Total card across full width for cleaner layout with 5 items */
-        .card-total {
-            grid-column: 1 / -1; 
-        }
+        /* Span the Total card across full width */
+        .card-total { grid-column: 1 / -1; }
 
         .metric-card {
             background: var(--color-white); border-radius: var(--radius); padding: 20px;
@@ -55,9 +54,8 @@
             box-shadow: var(--shadow-card); position: relative; cursor: default;
         }
 
-        .metric-card::after {
-            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 4px;
-        }
+        /* Top Border Accents */
+        .metric-card::after { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 4px; }
         .card-total::after { background: var(--color-primary); }
         .card-good::after { background: var(--color-success); }
         .card-warn::after { background: var(--color-warning); }
@@ -85,7 +83,7 @@
         const { useState, useEffect } = React;
 
         function App() {
-            // Updated State with 'untracked'
+            // State Management
             const [metrics, setMetrics] = useState({ total: 0, driving: 0, stopped: 0, offline: 0, untracked: 0 });
             const [loading, setLoading] = useState(true);
             const [statusText, setStatusText] = useState("Initializing...");
@@ -100,7 +98,10 @@
                 const rpcUrl = `https://${serverHost}/apiv1`;
                 const payload = {
                     method: method,
-                    params: { ...params, credentials: { database: creds.database, sessionId: creds.sessionId, userName: creds.userName } }
+                    params: { 
+                        ...params, 
+                        credentials: { database: creds.database, sessionId: creds.sessionId, userName: creds.userName } 
+                    }
                 };
                 const response = await fetch(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
                 if (!response.ok) throw new Error(`API call failed: ${response.statusText}`);
@@ -109,15 +110,18 @@
                 return json.result || [];
             }
 
-            // --- STEP 1: INVENTORY ---
+            // --- STEP 1: FETCH INVENTORY (Pagination Loop + Group Filter) ---
             async function fetchAllDevices(creds, groupIds) {
                 let allResults = [];
                 const resultsLimit = 5000;
                 let offsetName = null;
                 let lastId = null;
+                
+                // Parse Groups
                 const groupFilter = groupIds ? groupIds.split(',').map(id => ({ id: id.trim() })) : [];
 
                 while (true) {
+                    // Critical: Active Date + Group Filter
                     const searchParams = { fromDate: new Date().toISOString() };
                     if (groupFilter.length > 0) searchParams.groups = groupFilter;
 
@@ -140,17 +144,19 @@
                 return allResults;
             }
 
-            // --- STEP 2: STATUS & METRICS ---
+            // --- STEP 2: STATUS & METRICS CALCULATION ---
             async function calculateFleetMetrics(allDevices, creds) {
                 const totalFleet = allDevices.length;
                 if (totalFleet === 0) return { total: 0, driving: 0, stopped: 0, offline: 0, untracked: 0 };
 
+                // Fetch Status only for the FILTERED inventory IDs
                 const deviceIds = allDevices.map(d => ({ id: d.id }));
                 const statusResults = await fetchFromGeotab("Get", {
                     typeName: "DeviceStatusInfo",
                     search: { deviceSearch: { ids: deviceIds }, excludeUntrackedAssets: true }
                 }, creds);
 
+                // Map for O(1) Lookup
                 const statusMap = new Map();
                 statusResults.forEach(s => statusMap.set(s.device.id, s));
 
@@ -159,18 +165,19 @@
                 let offline = 0;
                 let untracked = 0;
 
+                // Iterate over INVENTORY to ensure correct classification
                 allDevices.forEach(device => {
                     const status = statusMap.get(device.id);
 
                     if (!status) {
-                        // NEW LOGIC: No status returned = Untracked (Ghost)
+                        // CASE 1: Device in Inventory, but no Status returned (Ghost)
                         untracked++;
                     } else {
                         if (status.isDeviceCommunicating === false) {
-                            // Status exists, but explicitly offline
+                            // CASE 2: Status exists, but explicitly Offline
                             offline++;
                         } else {
-                            // Communicating...
+                            // CASE 3: Communicating
                             if (status.isDriving === true) {
                                 driving++;
                             } else {
@@ -192,6 +199,7 @@
                 setCredentials(creds);
                 setActiveGroups(params.get('groups'));
 
+                // Listen for Filter Updates from Bridge
                 const handleMessage = (event) => {
                     if (event.data && event.data.type === "FILTER_UPDATE") {
                         setActiveGroups(event.data.groups);
@@ -208,7 +216,9 @@
                     setLoading(true);
                     try {
                         setStatusText("Syncing Fleet...");
+                        // 1. Get Filtered Inventory
                         const allDevices = await fetchAllDevices(credentials, activeGroups);
+                        // 2. Calculate Counts
                         const finalMetrics = await calculateFleetMetrics(allDevices, credentials);
                         setMetrics(finalMetrics);
                         setLoading(false);
@@ -227,7 +237,6 @@
 
             return (
                 <div className="dashboard-container">
-                    
                     <h2>Fleet Status Overview</h2>
                     
                     <div className="metrics-grid">
@@ -237,7 +246,7 @@
                             <div className="kpi-label">Total Fleet</div>
                         </div>
 
-                        {/* Row 2: Statuses */}
+                        {/* Status Row */}
                         <div className="metric-card card-good">
                             <div className="kpi-value" style={{color: 'var(--color-success)'}}>{metrics.driving}</div>
                             <div className="kpi-label">Driving</div>
@@ -253,7 +262,7 @@
                             <div className="kpi-label">Offline</div>
                         </div>
 
-                        {/* New Card: Untracked */}
+                        {/* Untracked Row */}
                         <div className="metric-card card-untracked">
                             <div className="kpi-value" style={{color: 'var(--color-neutral)'}}>{metrics.untracked}</div>
                             <div className="kpi-label">Untracked</div>
@@ -274,4 +283,3 @@
     </script>
 </body>
 </html>
-
