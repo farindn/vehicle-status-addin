@@ -17,6 +17,8 @@
             --color-success: #13AA09; /* Driving */
             --color-error: #FE4A3F;   /* Offline */
             --color-warning: #ff9800; /* Stopped */
+            --color-neutral: #9e9e9e; /* Untracked */
+            
             --shadow-card: 0 2px 6px rgba(0, 0, 0, 0.05);
             --radius: 8px;
         }
@@ -37,16 +39,22 @@
         }
 
         .metrics-grid {
-            display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+            display: grid; 
+            grid-template-columns: 1fr 1fr; /* Default 2 columns */
+            gap: 15px;
+        }
+
+        /* Span the Total card across full width for cleaner layout with 5 items */
+        .card-total {
+            grid-column: 1 / -1; 
         }
 
         .metric-card {
-            background: var(--color-white); border-radius: var(--radius); padding: 24px;
+            background: var(--color-white); border-radius: var(--radius); padding: 20px;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             box-shadow: var(--shadow-card); position: relative; cursor: default;
         }
 
-        /* Decorative Top Borders */
         .metric-card::after {
             content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 4px;
         }
@@ -54,12 +62,13 @@
         .card-good::after { background: var(--color-success); }
         .card-warn::after { background: var(--color-warning); }
         .card-bad::after { background: var(--color-error); }
+        .card-untracked::after { background: var(--color-neutral); }
 
         .kpi-value {
             font-size: 2.5rem; font-weight: 700; margin-bottom: 8px; line-height: 1; color: #333;
         }
         .kpi-label {
-            font-size: 0.9rem; color: var(--color-slate); font-weight: 500; text-transform: uppercase;
+            font-size: 0.85rem; color: var(--color-slate); font-weight: 600; text-transform: uppercase;
         }
 
         .status-container {
@@ -76,13 +85,12 @@
         const { useState, useEffect } = React;
 
         function App() {
-            // UI State
-            const [metrics, setMetrics] = useState({ total: 0, driving: 0, stopped: 0, offline: 0 });
+            // Updated State with 'untracked'
+            const [metrics, setMetrics] = useState({ total: 0, driving: 0, stopped: 0, offline: 0, untracked: 0 });
             const [loading, setLoading] = useState(true);
             const [statusText, setStatusText] = useState("Initializing...");
             const [error, setError] = useState(null);
 
-            // Logic State
             const [credentials, setCredentials] = useState(null);
             const [activeGroups, setActiveGroups] = useState(null); 
 
@@ -90,52 +98,28 @@
             async function fetchFromGeotab(method, params, creds) {
                 const serverHost = creds.server || window.location.hostname;
                 const rpcUrl = `https://${serverHost}/apiv1`;
-                
                 const payload = {
                     method: method,
-                    params: { 
-                        ...params, 
-                        credentials: {
-                            database: creds.database,
-                            sessionId: creds.sessionId,
-                            userName: creds.userName
-                        } 
-                    }
+                    params: { ...params, credentials: { database: creds.database, sessionId: creds.sessionId, userName: creds.userName } }
                 };
-
-                const response = await fetch(rpcUrl, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload),
-                });
-
+                const response = await fetch(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
                 if (!response.ok) throw new Error(`API call failed: ${response.statusText}`);
                 const json = await response.json();
                 if (json.error) throw new Error(json.error.message || "Unknown API error");
                 return json.result || [];
             }
 
-            // --- STEP 1: FETCH INVENTORY (With Group Filter) ---
+            // --- STEP 1: INVENTORY ---
             async function fetchAllDevices(creds, groupIds) {
                 let allResults = [];
                 const resultsLimit = 5000;
                 let offsetName = null;
                 let lastId = null;
-
-                // Parse Groups
-                const groupFilter = groupIds 
-                    ? groupIds.split(',').map(id => ({ id: id.trim() }))
-                    : [];
+                const groupFilter = groupIds ? groupIds.split(',').map(id => ({ id: id.trim() })) : [];
 
                 while (true) {
-                    const searchParams = {
-                        fromDate: new Date().toISOString() // Active devices only
-                    };
-
-                    // Apply Group Filter
-                    if (groupFilter.length > 0) {
-                        searchParams.groups = groupFilter;
-                    }
+                    const searchParams = { fromDate: new Date().toISOString() };
+                    if (groupFilter.length > 0) searchParams.groups = groupFilter;
 
                     const params = {
                         typeName: "Device",
@@ -143,116 +127,76 @@
                         resultsLimit: resultsLimit,
                         sort: { sortBy: "name", sortDirection: "asc" }
                     };
-
-                    if (offsetName !== null) {
-                        params.sort.offset = offsetName;
-                        params.sort.lastId = lastId;
-                    }
+                    if (offsetName !== null) { params.sort.offset = offsetName; params.sort.lastId = lastId; }
 
                     const devices = await fetchFromGeotab("Get", params, creds);
-
                     if (devices && devices.length > 0) {
                         allResults.push(...devices);
                         if (devices.length < resultsLimit) break;
                         const lastDevice = devices[devices.length - 1];
-                        offsetName = lastDevice.name;
-                        lastId = lastDevice.id;
-                    } else {
-                        break;
-                    }
+                        offsetName = lastDevice.name; lastId = lastDevice.id;
+                    } else { break; }
                 }
                 return allResults;
             }
 
-            // --- STEP 2: FETCH STATUS & CALCULATE METRICS ---
+            // --- STEP 2: STATUS & METRICS ---
             async function calculateFleetMetrics(allDevices, creds) {
                 const totalFleet = allDevices.length;
-                
-                if (totalFleet === 0) {
-                    return { total: 0, driving: 0, stopped: 0, offline: 0 };
-                }
+                if (totalFleet === 0) return { total: 0, driving: 0, stopped: 0, offline: 0, untracked: 0 };
 
-                // 1. Get IDs from the FILTERED inventory
                 const deviceIds = allDevices.map(d => ({ id: d.id }));
-
-                // 2. Fetch Status ONLY for these IDs
                 const statusResults = await fetchFromGeotab("Get", {
                     typeName: "DeviceStatusInfo",
-                    search: {
-                        deviceSearch: { ids: deviceIds },
-                        excludeUntrackedAssets: true
-                    }
+                    search: { deviceSearch: { ids: deviceIds }, excludeUntrackedAssets: true }
                 }, creds);
 
-                // 3. Create Lookup Map for efficiency
-                // Map: DeviceID -> Status Object
                 const statusMap = new Map();
                 statusResults.forEach(s => statusMap.set(s.device.id, s));
 
                 let driving = 0;
                 let stopped = 0;
                 let offline = 0;
+                let untracked = 0;
 
-                // 4. Iterate over the FILTERED Inventory List
-                // This ensures we strictly count only what is in the current filter.
                 allDevices.forEach(device => {
                     const status = statusMap.get(device.id);
 
                     if (!status) {
-                        // Edge Case: Device is in inventory but returned no status.
-                        // Strictly treating this as "Offline" (Not Communicating).
-                        offline++;
+                        // NEW LOGIC: No status returned = Untracked (Ghost)
+                        untracked++;
                     } else {
-                        // Apply Logic
                         if (status.isDeviceCommunicating === false) {
+                            // Status exists, but explicitly offline
                             offline++;
                         } else {
-                            // Communicating is TRUE
+                            // Communicating...
                             if (status.isDriving === true) {
                                 driving++;
                             } else {
-                                // Communicating + Not Driving = Stopped
                                 stopped++; 
                             }
                         }
                     }
                 });
 
-                return {
-                    total: totalFleet,
-                    driving: driving,
-                    stopped: stopped,
-                    offline: offline
-                };
+                return { total: totalFleet, driving, stopped, offline, untracked };
             }
 
-            // --- INITIALIZATION ---
+            // --- INIT & LISTENERS ---
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
-                const creds = {
-                    server: params.get('server'),
-                    database: params.get('database'),
-                    sessionId: params.get('sessionId'),
-                    userName: params.get('userName')
-                };
-
-                if (!creds.sessionId) {
-                    setError("Session credentials missing.");
-                    setLoading(false);
-                    return;
-                }
+                const creds = { server: params.get('server'), database: params.get('database'), sessionId: params.get('sessionId'), userName: params.get('userName') };
+                if (!creds.sessionId) { setError("Session credentials missing."); setLoading(false); return; }
 
                 setCredentials(creds);
                 setActiveGroups(params.get('groups'));
 
-                // Listener for Filter Changes
                 const handleMessage = (event) => {
                     if (event.data && event.data.type === "FILTER_UPDATE") {
-                        console.log("DASHBOARD: Group Filter Updated:", event.data.groups);
                         setActiveGroups(event.data.groups);
                     }
                 };
-
                 window.addEventListener("message", handleMessage);
                 return () => window.removeEventListener("message", handleMessage);
             }, []);
@@ -260,85 +204,65 @@
             // --- DATA SYNC ---
             useEffect(() => {
                 if (!credentials) return;
-
                 const runDataSync = async () => {
                     setLoading(true);
                     try {
-                        // 1. Fetch Inventory (Filtered)
-                        setStatusText("Syncing Fleet Inventory...");
+                        setStatusText("Syncing Fleet...");
                         const allDevices = await fetchAllDevices(credentials, activeGroups);
-                        console.log(`Filtered Fleet Size: ${allDevices.length}`);
-
-                        // 2. Calculate Metrics (Strict Logic)
-                        setStatusText(`Analyzing Status...`);
                         const finalMetrics = await calculateFleetMetrics(allDevices, credentials);
-
                         setMetrics(finalMetrics);
                         setLoading(false);
-
                     } catch (err) {
-                        console.error("Dashboard Error:", err);
+                        console.error(err);
                         setError(err.message);
                         setLoading(false);
                     }
                 };
-
                 runDataSync();
-            }, [credentials, activeGroups]); 
+            }, [credentials, activeGroups]);
 
             // --- RENDER ---
-            if (loading) {
-                return (
-                    <div className="status-container">
-                        <div style={{fontWeight: '500', color: 'var(--color-primary)'}}>Updating Data...</div>
-                        <div className="debug-text">{statusText}</div>
-                    </div>
-                );
-            }
-
-            if (error) {
-                return (
-                    <div className="status-container">
-                        <div style={{color: 'var(--color-error)'}}><strong>Connection Error</strong></div>
-                        <div className="debug-text">{error}</div>
-                    </div>
-                );
-            }
+            if (loading) return <div className="status-container"><div style={{fontWeight:'500', color:'var(--color-primary)'}}>Updating Data...</div><div className="debug-text">{statusText}</div></div>;
+            if (error) return <div className="status-container"><div style={{color:'var(--color-error)'}}><strong>Error</strong></div><div className="debug-text">{error}</div></div>;
 
             return (
                 <div className="dashboard-container">
                     
-                    <h2>Fleet Status Overview</h2>
+                    <h2>Fleet Overview</h2>
                     
                     <div className="metrics-grid">
-                        {/* Total Fleet */}
+                        {/* Total (Full Width) */}
                         <div className="metric-card card-total">
                             <div className="kpi-value" style={{color: 'var(--color-primary)'}}>{metrics.total}</div>
                             <div className="kpi-label">Total Fleet</div>
                         </div>
 
-                        {/* Driving */}
+                        {/* Row 2: Statuses */}
                         <div className="metric-card card-good">
                             <div className="kpi-value" style={{color: 'var(--color-success)'}}>{metrics.driving}</div>
                             <div className="kpi-label">Driving</div>
                         </div>
 
-                        {/* Stopped */}
                         <div className="metric-card card-warn">
                             <div className="kpi-value" style={{color: 'var(--color-warning)'}}>{metrics.stopped}</div>
                             <div className="kpi-label">Stopped</div>
                         </div>
 
-                        {/* Offline */}
                         <div className="metric-card card-bad">
                             <div className="kpi-value" style={{color: 'var(--color-error)'}}>{metrics.offline}</div>
                             <div className="kpi-label">Offline</div>
+                        </div>
+
+                        {/* New Card: Untracked */}
+                        <div className="metric-card card-untracked">
+                            <div className="kpi-value" style={{color: 'var(--color-neutral)'}}>{metrics.untracked}</div>
+                            <div className="kpi-label">Untracked</div>
                         </div>
                     </div>
 
                     <div style={{marginTop: 'auto', textAlign: 'center', paddingTop: '20px'}}>
                         <div className="debug-text">
-                            farinnugraha@geotab.com
+                            Filter: {activeGroups ? "Active Group Selection" : "Entire Fleet"}
                         </div>
                     </div>
                 </div>
@@ -350,5 +274,3 @@
     </script>
 </body>
 </html>
-
-
