@@ -61,7 +61,7 @@
             font-size: 0.9rem; color: var(--color-slate); font-weight: 500; text-transform: uppercase;
         }
 
-        /* States */
+        /* Loading & Error UI */
         .status-container {
             display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--color-slate); text-align: center;
         }
@@ -76,10 +76,16 @@
         const { useState, useEffect, useMemo } = React;
 
         function App() {
-            const [deviceData, setDeviceData] = useState([]);
+            // State
+            const [metrics, setMetrics] = useState({ total: 0, started: 0, stopped: 0, offline: 0 });
             const [loading, setLoading] = useState(true);
+            const [statusText, setStatusText] = useState("Initializing...");
             const [error, setError] = useState(null);
 
+            // API Credentials State
+            const [apiConfig, setApiConfig] = useState(null);
+
+            // 1. Setup API Config on Mount
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
                 const server = params.get('server');
@@ -90,79 +96,155 @@
                 if (!server || !sessionId) {
                     setError("Session credentials missing.");
                     setLoading(false);
-                    return;
+                } else {
+                    setApiConfig({ server, database, sessionId, userName });
                 }
+            }, []);
 
-                // API: Get DeviceStatusInfo
-                const rpcUrl = `https://${server}/apiv1`;
-                const payload = {
-                    method: "Get",
-                    params: {
-                        typeName: "DeviceStatusInfo",
-                        search: {}, // Fetch ALL visible devices
-                        credentials: { database, sessionId, userName }
-                    }
-                };
+            // 2. Main Logic Execution
+            useEffect(() => {
+                if (!apiConfig) return;
 
-                const fetchData = async () => {
+                const runDataSync = async () => {
                     try {
-                        const response = await fetch(rpcUrl, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        });
-                        const json = await response.json();
-                        if (json.error) throw new Error(json.error.message);
+                        // --- STEP 1: FETCH TOTAL VEHICLES (With Pagination) ---
+                        setStatusText("Fetching Vehicle Inventory...");
+                        
+                        let allDevices = [];
+                        let offsetName = null;
+                        let lastId = null;
+                        const resultsLimit = 5000;
+                        let hasMore = true;
 
-                        setDeviceData(json.result || []);
+                        // Pagination Loop (Logic from Reference Code)
+                        while (hasMore) {
+                            const params = {
+                                typeName: "Device",
+                                resultsLimit: resultsLimit,
+                                sort: { sortBy: "name", sortDirection: "asc" }
+                            };
+                            
+                            // Apply Pagination cursors
+                            if (offsetName !== null) {
+                                params.sort.offset = offsetName;
+                                params.sort.lastId = lastId;
+                            }
+
+                            const result = await makeApiCall("Get", params);
+                            
+                            if (result && result.length > 0) {
+                                allDevices.push(...result);
+                                
+                                // Setup next page cursor
+                                const lastDevice = result[result.length - 1];
+                                offsetName = lastDevice.name;
+                                lastId = lastDevice.id;
+
+                                // If we got fewer than limit, we are done
+                                if (result.length < resultsLimit) hasMore = false;
+                            } else {
+                                hasMore = false;
+                            }
+                        }
+
+                        console.log(`Total Inventory: ${allDevices.length} vehicles.`);
+
+
+                        // --- STEP 2: FETCH STATUS FOR THESE DEVICES ---
+                        setStatusText(`Analyzing Status for ${allDevices.length} Vehicles...`);
+
+                        let statusResults = [];
+                        
+                        if (allDevices.length > 0) {
+                            // Extract IDs for efficient fetching
+                            const deviceIds = allDevices.map(d => ({ id: d.id }));
+                            
+                            // Note: If fleet is massive (>5000), ideally we batch this too. 
+                            // But DeviceStatusInfo Get is usually robust enough for 10-20k in one go with search.
+                            statusResults = await makeApiCall("Get", {
+                                typeName: "DeviceStatusInfo",
+                                search: {
+                                    deviceSearch: { ids: deviceIds },
+                                    excludeUntrackedAssets: true
+                                }
+                            });
+                        }
+
+                        // --- STEP 3: CALCULATE METRICS ---
+                        calculateMetrics(allDevices.length, statusResults);
                         setLoading(false);
+
                     } catch (err) {
-                        console.error("API Error:", err);
+                        console.error("Dashboard Logic Error:", err);
                         setError(err.message);
                         setLoading(false);
                     }
                 };
 
-                fetchData();
-            }, []);
+                runDataSync();
+            }, [apiConfig]);
 
-            // --- REFINED METRIC LOGIC ---
-            const metrics = useMemo(() => {
-                let total = 0;
-                let started = 0;
-                let stopped = 0;
-                let notCommunicating = 0;
-
-                deviceData.forEach(d => {
-                    total++;
-
-                    // Logic Check:
-                    // 1. Check Communication first. If offline, it goes to 'Not Communicating'.
-                    // 2. If Online, check Driving status.
-                    
-                    const isComm = d.isDeviceCommunicating; // Boolean
-                    const isDriving = d.isDriving; // Boolean
-
-                    if (!isComm) {
-                        // Device is Offline / Not Communicating
-                        notCommunicating++;
-                    } else {
-                        // Device is Communicating
-                        if (isDriving) {
-                            started++;
-                        } else {
-                            stopped++;
+            // --- HELPER: Generic API Call ---
+            const makeApiCall = async (method, params) => {
+                const rpcUrl = `https://${apiConfig.server}/apiv1`;
+                const payload = {
+                    method: method,
+                    params: {
+                        ...params,
+                        credentials: {
+                            database: apiConfig.database,
+                            sessionId: apiConfig.sessionId,
+                            userName: apiConfig.userName
                         }
                     }
+                };
+
+                const response = await fetch(rpcUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
                 });
-                return { total, started, stopped, notCommunicating };
-            }, [deviceData]);
+
+                const json = await response.json();
+                if (json.error) throw new Error(json.error.message);
+                return json.result || [];
+            };
+
+            // --- LOGIC: Metric Calculation ---
+            const calculateMetrics = (totalCount, statusData) => {
+                let started = 0;
+                let stopped = 0;
+                let offline = 0;
+
+                // Create a map for fast lookups if needed, though simpler iteration works here
+                statusData.forEach(status => {
+                    const isComm = status.isDeviceCommunicating;
+                    const isDriving = status.isDriving;
+
+                    if (!isComm) {
+                        offline++;
+                    } else if (isDriving) {
+                        started++;
+                    } else {
+                        stopped++;
+                    }
+                });
+
+                setMetrics({
+                    total: totalCount, // Sourced from "Get Device"
+                    started: started,  // Sourced from "DeviceStatusInfo"
+                    stopped: stopped,  // Sourced from "DeviceStatusInfo"
+                    offline: offline   // Sourced from "DeviceStatusInfo"
+                });
+            };
+
+            // --- RENDER UI ---
 
             if (loading) {
                 return (
                     <div className="status-container">
                         <div style={{fontWeight: '500', color: 'var(--color-primary)'}}>Connecting to Fleet...</div>
-                        <div className="debug-text">Retrieving DeviceStatusInfo</div>
+                        <div className="debug-text">{statusText}</div>
                     </div>
                 );
             }
@@ -178,38 +260,37 @@
 
             return (
                 <div className="dashboard-container">
-                    
-                    <h2>Fleet Status</h2>
+                    <h2>Fleet Overview</h2>
                     
                     <div className="metrics-grid">
-                        {/* Total Vehicles */}
+                        {/* Total Vehicles (From Inventory Call) */}
                         <div className="metric-card card-total">
                             <div className="kpi-value" style={{color: 'var(--color-primary)'}}>{metrics.total}</div>
-                            <div className="kpi-label">Total Fleet</div>
+                            <div className="kpi-label">Total Vehicles</div>
                         </div>
 
-                        {/* Vehicles Started (Driving) */}
+                        {/* Vehicles Started (From Status Call) */}
                         <div className="metric-card card-good">
                             <div className="kpi-value" style={{color: 'var(--color-success)'}}>{metrics.started}</div>
-                            <div className="kpi-label">Driving</div>
+                            <div className="kpi-label">Vehicles Started</div>
                         </div>
 
-                        {/* Vehicles Stopped */}
+                        {/* Vehicles Stopped (From Status Call) */}
                         <div className="metric-card card-warn">
                             <div className="kpi-value" style={{color: 'var(--color-warning)'}}>{metrics.stopped}</div>
-                            <div className="kpi-label">Stopped</div>
+                            <div className="kpi-label">Vehicles Stopped</div>
                         </div>
 
-                        {/* Not Communicating */}
+                        {/* Not Communicating (From Status Call) */}
                         <div className="metric-card card-bad">
-                            <div className="kpi-value" style={{color: 'var(--color-error)'}}>{metrics.notCommunicating}</div>
-                            <div className="kpi-label">Offline</div>
+                            <div className="kpi-value" style={{color: 'var(--color-error)'}}>{metrics.offline}</div>
+                            <div className="kpi-label">Not Communicating</div>
                         </div>
                     </div>
 
                     <div style={{marginTop: 'auto', textAlign: 'center', paddingTop: '20px'}}>
                         <div className="debug-text">
-                            © farinnugraha@geotab.com
+                            Data Source: Geotab API (Inventory & Status)
                         </div>
                     </div>
                 </div>
